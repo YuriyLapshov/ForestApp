@@ -5,6 +5,8 @@ import serial
 import logging
 from django.apps import AppConfig
 from django.core.exceptions import ObjectDoesNotExist
+from django.utils import timezone
+
 from ThermalMap.models import DeviceStatus
 import re
 
@@ -201,6 +203,7 @@ class SMSListener:
 
             try:
                 device = DeviceStatus.objects.get(phone_number=self._extract_phone_number(sms['info']))
+                print(f"Message received: {sms}")
                 if sms['text'].startswith('equipment is power on'):
                     print(f"Status message received! device: {device}")
                     device.status = 4
@@ -210,12 +213,16 @@ class SMSListener:
                     device.status = 0
                     device.save()
                 if sms['text'].startswith('STATUS IS ALL'):
-                    print(f"Status message received! device: {device}")
+                    print(f"Status IS ALL message received! device: {device}")
                     t1_match = re.search(r'T1:\s*([-+]?\d*\.?\d+)', sms['text'])
+                    print(f"t1_match: {t1_match}")
                     t2_match = re.search(r'T2:\s*([-+]?\d*\.?\d+)', sms['text'])
+                    print(f"t2_match: {t1_match}")
 
                     t1 = float(t1_match.group(1)) if t1_match else None
+                    print(f"t1: {t1}")
                     t2 = float(t2_match.group(1)) if t2_match else None
+                    print(f"t2: {t2}")
                     if t1 is not None:
                         device.temperature1 = t1
                     else:
@@ -225,13 +232,16 @@ class SMSListener:
                     else:
                         device.temperature2 = -100
                     device.status = 1
+                    device.update_datetime = timezone.now()
                     device.save()
+                    print("Status saved.")
                 if sms['text'].startswith('1st temp'):
                     match = re.search(r'([-+]?\d+\.?\d*)C', sms['text'])
                     if match:
                         temp = float(match.group(1))
                         device.status = 2
                         device.temperature1 = temp
+                        device.update_datetime = timezone.now()
                         device.save()
                     if sms['text'].startswith('2nd temp'):
                         match = re.search(r'([-+]?\d+\.?\d*)C', sms['text'])
@@ -239,6 +249,7 @@ class SMSListener:
                             temp = float(match.group(1))
                             device.status = 3
                             device.temperature2 = temp
+                            device.update_datetime = timezone.now()
                             device.save()
             except ObjectDoesNotExist:
                 print("SMS received from device not in database")
@@ -304,6 +315,25 @@ class SMSListener:
             except Exception as e:
                 print(f"❌ Ошибка при отправке: {e}")
 
+    def clear_number(self, dirty_number):
+        phone_number = ''.join(filter(str.isdigit, dirty_number))
+        if not phone_number.startswith('7') and not phone_number.startswith('8'):
+            phone_number = '7' + phone_number
+
+        # Форматируем номер в международный формат
+        if phone_number.startswith('8'):
+            phone_number = '7' + phone_number[1:]
+        if not phone_number.startswith('+'):
+            phone_number = '+' + phone_number
+        return phone_number
+
+    def poll_all_devices(self):
+        devices = DeviceStatus.objects.all()
+        for device in devices:
+            device.request_datetime = timezone.now()
+            device.save()
+            self.send(self.clear_number(device.phone_number), 'SN0000OFF')
+
     def send(self, phone, message):
         """Добавление SMS в очередь отправки"""
         with self.lock:  # ⭐ Блокировка при добавлении
@@ -311,6 +341,7 @@ class SMSListener:
             print(f"📨 SMS добавлено в очередь для {phone}: {message}")
             print(f"📊 В очереди: {len(self.send_queue)} сообщений")
             print(f"🔍 DEBUG Queue contents: {self.send_queue}")  # ⭐ Для отладки
+
 
 # Глобальный экземпляр слушателя
 sms_listener = SMSListener()

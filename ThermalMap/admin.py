@@ -1,26 +1,35 @@
 from django.contrib import admin
+from django import forms
 from django.utils.html import format_html
 from .models import DeviceStatus
 
 
-@admin.register(DeviceStatus)
+class DeviceStatusForm(forms.ModelForm):
+    map_latitude = forms.FloatField(required=False, widget=forms.HiddenInput())
+    map_longitude = forms.FloatField(required=False, widget=forms.HiddenInput())
+
+    class Meta:
+        model = DeviceStatus
+        fields = '__all__'
+
+
 class DeviceStatusAdmin(admin.ModelAdmin):
+    form = DeviceStatusForm
+    # change_form_template = 'admin/device_status_change_form.html'
+
+    # Используем только реальные поля модели + один кастомный метод
     list_display = [
         'name',
         'phone_number',
-        'temperature_display',
-        'status',
-        'coordinates_display',
+        'temperature1',  # прямое поле модели
+        'temperature2',  # прямое поле модели
+        'get_status_display',  # автоматический метод Django для choices
+        'coordinates_display',  # кастомный метод
         'update_datetime',
-        'map_link'
+        'request_datetime',
+        'map_link'  # кастомный метод
     ]
 
-    list_filter = ['status', 'update_datetime']
-    search_fields = ['name', 'phone_number']
-    readonly_fields = ['update_datetime', 'map_preview']
-    list_editable = ['status']
-
-    # Порядок полей в форме редактирования
     fieldsets = [
         ('Основная информация', {
             'fields': ['name', 'phone_number', 'status']
@@ -29,82 +38,62 @@ class DeviceStatusAdmin(admin.ModelAdmin):
             'fields': ['temperature1', 'temperature2'],
             'classes': ['collapse']
         }),
+        ('Выбор местоположения на карте', {
+            'fields': ['map_latitude', 'map_longitude'],
+            'description': 'Кликните на карте для выбора местоположения'
+        }),
         ('Географические координаты', {
-            'fields': ['latitude', 'longitude', 'map_preview'],
-            'description': 'Координаты для отображения на карте'
+            'fields': ['latitude', 'longitude'],
+            'classes': ['collapse'],
+            'description': 'Автоматически заполняются при выборе на карте'
         }),
         ('Временные метки', {
-            'fields': ['update_datetime'],
+            'fields': ['update_datetime', 'request_datetime'],
             'classes': ['collapse']
         }),
     ]
 
-    # Кастомные методы для отображения
-    def temperature_display(self, obj):
-        if obj.temperature1 and obj.temperature2:
-            return f"{obj.temperature1}°C / {obj.temperature2}°C"
-        return "-"
+    readonly_fields = ['update_datetime', 'request_datetime']
+    list_filter = ['status', 'update_datetime']
+    search_fields = ['name', 'phone_number']
 
-    temperature_display.short_description = 'Температуры'
+    class Media:
+        js = (
+            'https://api-maps.yandex.ru/2.1/?apikey=ваш_api_ключ&lang=ru_RU',
+            'admin/js/yandex_map.js',  # наш кастомный JS файл
+        )
+        css = {
+            'all': ('admin/css/yandex_map.css',)
+        }
 
-    def status_display(self, obj):
-        status_map = {0: '🔴 Отключено (нет питания)', 1: '🟢 ОК', 2: '🟡 Перегрев датчик 1', 3: '🟡 Перегрев датчик 2',
-                      4: '🔵 Включено (питание подано)'}
-        return status_map.get(obj.status, 'Неизвестно')
-
-    status_display.short_description = 'Статус'
-
+    # Минимальные кастомные методы
     def coordinates_display(self, obj):
-        if obj.has_coordinates:
+        if obj.latitude is not None and obj.longitude is not None:
             return f"{obj.latitude:.6f}, {obj.longitude:.6f}"
         return "❌ Нет координат"
 
     coordinates_display.short_description = 'Координаты'
 
     def map_link(self, obj):
-        if obj.has_coordinates:
+        if obj.latitude is not None and obj.longitude is not None:
             url = obj.get_yandex_map_url()
             return format_html(
-                '<a href="{}" target="_blank" style="background: #FF0000; color: white; padding: 2px 6px; border-radius: 3px; text-decoration: none;">🗺️ На карте</a>',
+                '<a href="{}" target="_blank">🗺️</a>',
                 url
             )
         return "—"
 
     map_link.short_description = 'Карта'
 
-    def map_preview(self, obj):
-        """Превью карты в форме редактирования"""
-        if obj.has_coordinates:
-            # Статическая карта Яндекс (можно использовать API для превью)
-            static_map_url = f"https://static-maps.yandex.ru/1.x/?ll={obj.longitude},{obj.latitude}&size=450,300&z=13&l=map&pt={obj.longitude},{obj.latitude},pm2rdm"
-            return format_html(
-                '''
-                <div>
-                    <a href="{}" target="_blank">
-                        <img src="{}" style="max-width: 450px; height: auto; border: 1px solid #ccc; border-radius: 4px;" alt="Карта"/>
-                    </a>
-                    <p style="margin-top: 5px; font-size: 12px; color: #666;">
-                        <a href="{}" target="_blank">Открыть в Яндекс.Картах</a>
-                    </p>
-                </div>
-                ''',
-                obj.get_yandex_map_url(),
-                static_map_url,
-                obj.get_yandex_map_url()
-            )
-        return "❌ Координаты не указаны"
+    def save_model(self, request, obj, form, change):
+        map_lat = form.cleaned_data.get('map_latitude')
+        map_lon = form.cleaned_data.get('map_longitude')
 
-    map_preview.short_description = 'Превью на карте'
+        if map_lat and map_lon:
+            obj.latitude = map_lat
+            obj.longitude = map_lon
 
-    # Действия для массового обновления
-    actions = ['make_active', 'make_inactive']
+        super().save_model(request, obj, form, change)
 
-    def make_active(self, request, queryset):
-        queryset.update(status=1)
 
-    make_active.short_description = "Перевести в статус 'Активно'"
-
-    def make_inactive(self, request, queryset):
-        queryset.update(status=0)
-
-    make_inactive.short_description = "Перевести в статус 'Неактивно'"
+admin.site.register(DeviceStatus, DeviceStatusAdmin)

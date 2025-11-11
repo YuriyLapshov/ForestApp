@@ -58,6 +58,11 @@ html
         <h3>Устройства на карте</h3>
         <div id="device-counter">Всего устройств: {{ devices|length }}</div>
         <button onclick="fitToMarkers()">Показать все устройства</button>
+        <form method="post" action="{% url 'poll_devices' %}">
+            {% csrf_token %}
+            <button type="submit">Зпросить статусы устройств</button>
+        </form>
+
     </div>
 
     <div id="map"></div>
@@ -160,6 +165,7 @@ html
                 }
             }
         }
+
 
         function updateDeviceCounter() {
             const counter = document.getElementById('device-counter');

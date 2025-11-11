@@ -1,10 +1,199 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
-</head>
-<body>
-$END$
-</body>
-</html>
+{% extends "admin/change_form.html" %}
+{% load static %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    .map-container {
+        margin: 20px 0;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    
+    #device-map {
+        width: 100%;
+        height: 400px;
+    }
+    
+    .map-controls {
+        background: #f8f8f8;
+        padding: 10px;
+        border-bottom: 1px solid #ccc;
+    }
+    
+    .map-controls button {
+        margin-right: 10px;
+        padding: 5px 10px;
+        background: #417690;
+        color: white;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+    }
+    
+    .map-controls button:hover {
+        background: #205067;
+    }
+    
+    .coordinates-display {
+        background: #fff;
+        padding: 10px;
+        font-family: monospace;
+        border-top: 1px solid #ccc;
+    }
+    
+    .field-map_latitude, .field-map_longitude {
+        display: none;
+    }
+</style>
+{% endblock %}
+
+{% block field_sets %}
+{% for fieldset in adminform %}
+    {% if fieldset.name == "Координаты на карте" %}
+        <fieldset class="module aligned {{ fieldset.classes }}">
+            <h2>{{ fieldset.name }}</h2>
+            {% if fieldset.description %}
+                <div class="description">{{ fieldset.description|safe }}</div>
+            {% endif %}
+            
+            <div class="map-controls">
+                <button type="button" id="find-by-address">Найти по адресу</button>
+                <button type="button" id="clear-marker">Убрать метку</button>
+                <button type="button" id="use-current">Текущее местоположение</button>
+            </div>
+            
+            <div class="map-container">
+                <div id="device-map"></div>
+            </div>
+            
+            <div class="coordinates-display">
+                <strong>Выбранные координаты:</strong>
+                <span id="coordinates-display">Не выбраны</span>
+            </div>
+            
+            {% for line in fieldset %}
+                {% for field in line %}
+                    {{ field.field }}
+                {% endfor %}
+            {% endfor %}
+        </fieldset>
+    {% else %}
+        {{ block.super }}
+    {% endif %}
+{% endfor %}
+{% endblock %}
+
+{% block admin_change_form_document_ready %}
+{{ block.super }}
+<script src="https://api-maps.yandex.ru/2.1/?apikey=ваш_api_ключ&lang=ru_RU" type="text/javascript"></script>
+<script>
+    let map;
+    let selectedPlacemark = null;
+    
+    // Инициализация карты
+    ymaps.ready(initMap);
+    
+    function initMap() {
+        // Получаем текущие координаты из скрытых полей или используем Москву по умолчанию
+        const initialLat = document.getElementById('id_map_latitude').value || 55.7558;
+        const initialLon = document.getElementById('id_map_longitude').value || 37.6173;
+        
+        map = new ymaps.Map('device-map', {
+            center: [initialLat, initialLon],
+            zoom: 10,
+            controls: ['zoomControl', 'typeSelector']
+        });
+        
+        // Если есть координаты, ставим метку
+        if (initialLat && initialLon && initialLat != 55.7558) {
+            createPlacemark([parseFloat(initialLat), parseFloat(initialLon)]);
+        }
+        
+        // Обработчик клика по карте
+        map.events.add('click', function (e) {
+            const coords = e.get('coords');
+            createPlacemark(coords);
+            updateCoordinates(coords);
+        });
+        
+        // Кнопка "Найти по адресу"
+        document.getElementById('find-by-address').addEventListener('click', function() {
+            const address = prompt('Введите адрес для поиска:');
+            if (address) {
+                ymaps.geocode(address).then(function (res) {
+                    const firstGeoObject = res.geoObjects.get(0);
+                    if (firstGeoObject) {
+                        const coords = firstGeoObject.geometry.getCoordinates();
+                        map.setCenter(coords, 15);
+                        createPlacemark(coords);
+                        updateCoordinates(coords);
+                    } else {
+                        alert('Адрес не найден');
+                    }
+                });
+            }
+        });
+        
+        // Кнопка "Убрать метку"
+        document.getElementById('clear-marker').addEventListener('click', function() {
+            if (selectedPlacemark) {
+                map.geoObjects.remove(selectedPlacemark);
+                selectedPlacemark = null;
+            }
+            document.getElementById('id_map_latitude').value = '';
+            document.getElementById('id_map_longitude').value = '';
+            document.getElementById('coordinates-display').textContent = 'Не выбраны';
+        });
+        
+        // Кнопка "Текущее местоположение"
+        document.getElementById('use-current').addEventListener('click', function() {
+            if ("geolocation" in navigator) {
+                navigator.geolocation.getCurrentPosition(function(position) {
+                    const coords = [position.coords.latitude, position.coords.longitude];
+                    map.setCenter(coords, 15);
+                    createPlacemark(coords);
+                    updateCoordinates(coords);
+                }, function(error) {
+                    alert('Не удалось получить текущее местоположение');
+                });
+            } else {
+                alert('Геолокация не поддерживается вашим браузером');
+            }
+        });
+    }
+    
+    function createPlacemark(coords) {
+        // Удаляем предыдущую метку
+        if (selectedPlacemark) {
+            map.geoObjects.remove(selectedPlacemark);
+        }
+        
+        // Создаем новую метку
+        selectedPlacemark = new ymaps.Placemark(coords, {
+            hintContent: 'Местоположение устройства',
+            balloonContent: 'Выбранное местоположение'
+        }, {
+            preset: 'islands#redIcon',
+            draggable: true
+        });
+        
+        // Добавляем метку на карту
+        map.geoObjects.add(selectedPlacemark);
+        
+        // Обработчик перемещения метки
+        selectedPlacemark.events.add('dragend', function () {
+            const newCoords = selectedPlacemark.geometry.getCoordinates();
+            updateCoordinates(newCoords);
+        });
+    }
+    
+    function updateCoordinates(coords) {
+        document.getElementById('id_map_latitude').value = coords[0].toFixed(6);
+        document.getElementById('id_map_longitude').value = coords[1].toFixed(6);
+        document.getElementById('coordinates-display').textContent = 
+            `Широта: ${coords[0].toFixed(6)}, Долгота: ${coords[1].toFixed(6)}`;
+    }
+</script>
+{% endblock %}

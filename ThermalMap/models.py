@@ -56,9 +56,13 @@ class DeviceStatus(models.Model):
         help_text='Долгота в градусах от -180 до 180'
     )
 
-
     update_datetime = models.DateTimeField(
         verbose_name='Дата и время обновления',
+        default=timezone.now
+    )
+
+    request_datetime = models.DateTimeField(
+        verbose_name='Дата и время запроса',
         default=timezone.now
     )
 
@@ -94,6 +98,8 @@ class DeviceStatus(models.Model):
         return None
 
     def save(self, *args, **kwargs):
+        """Автоматическое обновление времени"""
         if not self.pk:
             self.update_datetime = timezone.now()
+            self.request_datetime = timezone.now()
         super().save(*args, **kwargs)

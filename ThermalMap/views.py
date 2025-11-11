@@ -4,7 +4,7 @@ import time
 
 from django.apps import apps
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 import serial.tools.list_ports
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -62,6 +62,15 @@ def send_sms_view(request):
         'message': f'SMS поставлено на отправку {phone_number}',
         'sms_length': len(message)
     })
+
+
+def poll_devices(request):
+    app_config = apps.get_app_config('ThermalMap')
+    if not hasattr(app_config, 'sms_listener') or app_config.sms_listener is None:
+        return JsonResponse({"error": "SMS listener not initialized"}, status=500)
+    sms_listener = app_config.sms_listener
+    sms_listener.poll_all_devices()
+    return redirect('devices_map')
 
 
 def devices_map(request):
