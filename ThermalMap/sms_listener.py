@@ -1,6 +1,8 @@
 import queue
 import threading
 import time
+from datetime import timedelta
+
 import serial
 import logging
 from django.apps import AppConfig
@@ -65,6 +67,7 @@ class SMSListener:
 
             # Счетчик для периодической очистки
             last_cleanup = time.time()
+            last_request_check = time.time()
 
             while self.running:
                 self._process_send_queue()
@@ -80,6 +83,11 @@ class SMSListener:
                 if current_time - last_cleanup > 1800:  # 30 минут
                     self._cleanup_old_sms_only()
                     last_cleanup = current_time
+
+                # Здесь вызываем проверку, не было ли у нас устройств, которые мы двно не опрашивали
+                if current_time - last_request_check > 5:  # 5 секунд
+                    self._check_unrequested_devices()
+                    last_request_check = current_time
 
                 time.sleep(2)
 
@@ -207,10 +215,13 @@ class SMSListener:
                 if sms['text'].startswith('equipment is power on'):
                     print(f"Status message received! device: {device}")
                     device.status = 4
+                    device.update_datetime = timezone.now()
                     device.save()
+                    self.send(self.clear_number(device.phone_number), 'SN0000OFF')  # Если включили устройство, запрашиваем данные
                 if sms['text'].startswith('equipment is power off'):
                     print(f"Status message received! device: {device}")
                     device.status = 0
+                    device.update_datetime = timezone.now()
                     device.save()
                 if sms['text'].startswith('STATUS IS ALL'):
                     print(f"Status IS ALL message received! device: {device}")
@@ -327,6 +338,20 @@ class SMSListener:
             phone_number = '+' + phone_number
         return phone_number
 
+    def _check_unrequested_devices(self):
+        devices = DeviceStatus.objects.all()
+        for device in devices:
+            time_difference = timezone.now() - device.request_datetime
+            response_difference = timezone.now() - device.update_datetime
+            if time_difference > timedelta(hours=24):
+                device.request_datetime = timezone.now()
+                device.save()
+                self.send(self.clear_number(device.phone_number), 'SN0000OFF')
+            if response_difference > timedelta(hours=25) and device.status == 1: # Если от устройства нет ответа 25 часов, считаем его отключенным
+                device.status = 0
+                device.save()
+
+
     def poll_all_devices(self):
         devices = DeviceStatus.objects.all()
         for device in devices:
@@ -342,6 +367,11 @@ class SMSListener:
             print(f"📊 В очереди: {len(self.send_queue)} сообщений")
             print(f"🔍 DEBUG Queue contents: {self.send_queue}")  # ⭐ Для отладки
 
-
+    def init_device(self, phone):
+        self.send(phone, "SN0000GRA01P0550FFFF")
+        self.send(phone, "SN0000GRB02P0550FFFF")
+        self.send(phone, "SN0000TLO")
+        self.send(phone, "SN0000DLO")
+        self.send(phone, "SN0000OFF")
 # Глобальный экземпляр слушателя
 sms_listener = SMSListener()

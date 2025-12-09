@@ -3,6 +3,7 @@ import logging
 import time
 
 from django.apps import apps
+from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
 import serial.tools.list_ports
@@ -12,10 +13,12 @@ from django.views.decorators.http import require_http_methods
 from .models import DeviceStatus
 
 
+@login_required(login_url='/admin/login/')
 def index(request):
-    return HttpResponse(f"Статус подключения: OK")
+    return redirect('devices_map')
 
 
+@login_required(login_url='/admin/login/')
 @csrf_exempt
 @require_http_methods(["GET"])
 def send_sms_view(request):
@@ -64,6 +67,7 @@ def send_sms_view(request):
     })
 
 
+@login_required(login_url='/admin/login/')
 def poll_devices(request):
     app_config = apps.get_app_config('ThermalMap')
     if not hasattr(app_config, 'sms_listener') or app_config.sms_listener is None:
@@ -73,6 +77,7 @@ def poll_devices(request):
     return redirect('devices_map')
 
 
+@login_required(login_url='/admin/login/')
 def devices_map(request):
     # Получаем все устройства с координатами
     devices = DeviceStatus.objects.filter(

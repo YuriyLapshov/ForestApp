@@ -67,8 +67,8 @@ class DeviceStatus(models.Model):
     )
 
     class Meta:
-        verbose_name = 'Статус устройства'
-        verbose_name_plural = 'Статусы устройств'
+        verbose_name = 'Термальное устройство'
+        verbose_name_plural = 'Термальные устройства'
         ordering = ['-update_datetime']
         indexes = [
             models.Index(fields=['name']),

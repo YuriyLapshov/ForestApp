@@ -1,8 +1,16 @@
+from django.apps import apps
 from django.contrib import admin
 from django import forms
+from django.http import JsonResponse, HttpResponseRedirect
+from django.urls import reverse, path
 from django.utils.html import format_html
 from .models import DeviceStatus
 
+
+# Изменяем заголовки
+admin.site.site_header = 'Администрирование ThermalForest'  # Заголовок на странице входа
+admin.site.site_title = 'Управление устройствами'  # Заголовок вкладки браузера
+admin.site.index_title = 'Администрирование ThermalForest'  # Заголовок на главной странице админки
 
 class DeviceStatusForm(forms.ModelForm):
     map_latitude = forms.FloatField(required=False, widget=forms.HiddenInput())
@@ -23,10 +31,11 @@ class DeviceStatusAdmin(admin.ModelAdmin):
         'phone_number',
         'temperature1',  # прямое поле модели
         'temperature2',  # прямое поле модели
-        'get_status_display',  # автоматический метод Django для choices
+        'status',  # автоматический метод Django для choices
         'coordinates_display',  # кастомный метод
         'update_datetime',
         'request_datetime',
+        'action_buttons',  # НОВОЕ: кнопки действий
         'map_link'  # кастомный метод
     ]
 
@@ -85,6 +94,48 @@ class DeviceStatusAdmin(admin.ModelAdmin):
 
     map_link.short_description = 'Карта'
 
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path('<path:object_id>/register/',
+                 self.admin_site.admin_view(self.register_device),
+                 name='register_device'),
+        ]
+        return custom_urls + urls
+
+    def action_buttons(self, obj):
+        register_button = format_html(
+            '<a class="button" href="{}" style="background-color: #4CAF50; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px; margin-right: 5px;">'
+            'Прописать в системе'
+            '</a>',
+            reverse('admin:register_device', args=[obj.id])
+        )
+        return format_html(
+            '<div style="display: flex; gap: 5px; white-space: nowrap;">'
+            '{}'
+            '</div>',
+            register_button
+        )
+
+    action_buttons.short_description = 'Действия'
+    action_buttons.allow_tags = True
+
+    def register_device(self, request, object_id):
+        try:
+            device = DeviceStatus.objects.get(id=object_id)
+            app_config = apps.get_app_config('ThermalMap')
+            if not hasattr(app_config, 'sms_listener') or app_config.sms_listener is None:
+                return JsonResponse({"error": "SMS listener not initialized"}, status=500)
+            sms_listener = app_config.sms_listener
+            sms_listener.init_device(device.phone_number)
+        except DeviceStatus.DoesNotExist:
+            pass
+
+
+    # Возвращаемся на страницу списка устройств
+        return HttpResponseRedirect(
+            reverse('admin:ThermalMap_devicestatus_changelist')
+        )
     def save_model(self, request, obj, form, change):
         map_lat = form.cleaned_data.get('map_latitude')
         map_lon = form.cleaned_data.get('map_longitude')
