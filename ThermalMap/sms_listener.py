@@ -254,14 +254,14 @@ class SMSListener:
                         device.temperature1 = temp
                         device.update_datetime = timezone.now()
                         device.save()
-                    if sms['text'].startswith('2nd temp'):
-                        match = re.search(r'([-+]?\d+\.?\d*)C', sms['text'])
-                        if match:
-                            temp = float(match.group(1))
-                            device.status = 3
-                            device.temperature2 = temp
-                            device.update_datetime = timezone.now()
-                            device.save()
+                if sms['text'].startswith('2nd temp'):
+                    match = re.search(r'([-+]?\d+\.?\d*)C', sms['text'])
+                    if match:
+                        temp = float(match.group(1))
+                        device.status = 3
+                        device.temperature2 = temp
+                        device.update_datetime = timezone.now()
+                        device.save()
             except ObjectDoesNotExist:
                 print("SMS received from device not in database")
                 pass
